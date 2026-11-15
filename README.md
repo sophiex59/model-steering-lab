@@ -12,12 +12,42 @@ Our working hypothesis is that steering changes how the model expresses capabili
 
 ## Sandbagging Experiment Set-Up
 
-1. Starting with a small model (Qwen3-0.6B), we elicit sandbagging using prompting, following the prompting style in this repo: https://github.com/Divya-Srivastava18521/Frontier-AI-Model-Evaluation-Replication 
-2. We also collect honest answers to the same question, creating pairs.
-3. Extract assistant-response activations at the same layer and token span; average the paired difference to get a candidate vector.
-4. Test on held-out items with no sandbagging instruction: no vector (`α = 0`), positive coefficients, and negative coefficients.
-5. Compare with the explicit-prompt condition and a norm-matched shuffled-vector control.
-6. Measure accuracy, valid answers, coherence, and error patterns to separate controlled underperformance from generic damage.
+Stage 1. Starting with a small model (Qwen3-0.6B), we elicit sandbagging using prompting, following the prompting style in this repo: https://github.com/Divya-Srivastava18521/Frontier-AI-Model-Evaluation-Replication. We also collect honest answers to the same question, creating pairs. We aim to see here: Can a direction learned from examples of concealed, instructed underperformance make Qwen3-0.6B underperform on new questions, and do its outputs resemble those of a  weaker model?
+Stage 3. Extract assistant-response activations at the same layer and token span; average the paired difference to get a candidate vector.
+Stage 4. Test on held-out items with no sandbagging instruction: no vector (`α = 0`), positive coefficients, and negative coefficients.
+Stage 5. Compare with the explicit-prompt condition and a norm-matched shuffled-vector control.
+Stage 6. Measure accuracy, valid answers, coherence, and error patterns to separate controlled underperformance from generic damage.
+
+
+# more details
+For a set benchmark, elicit sandbagging (and hopefully underperformance too), and compare against baseline for the same questions.
+
+Check the difference in performance, although that doesn't necessarily matter? Just recording data here.
+
+Maybe think about different datasets? One of more safety-related. 
+In the first case, just find a general knowledge style question-answer set.
+
+I'm thinking 150 questions, 100 steering, 50 evaluation? with all the numbers here idk what the standard is so if you can research and check that would be good.
+
+For paired answers, we need to control for question length, wording. (idk why we would need to control for answer choice?)
+
+So for 'answer normally' please come up with 3-5 answer normally styles here:
+[]
+
+and for 'sandbagging' we can use the ones from our earlier results and that other github repository. 
+before starting we need to do some careful checks to ensure these are actually eliciting the behaviour.
+
+
+
+for comparing we will do At minimum: no steering, positive steering, negative steering, and an explicit underperformance prompt (why this last one?). What control should we do that will show that any change comes from your direction rather than an arbitrary activation change?
+
+idk how we will steer i don't know anything about steering
+
+
+How reliable should the result be? - i have no idea
+
+"if the model is given examples or instructions to underperform, the experiment tests whether steering can reproduce that behavior. Calling the result covert sandbagging would require evidence for that stronger interpretation." - this is worth thinking about more
+
 
 ## Repository map
 
