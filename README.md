@@ -2,7 +2,7 @@
 
 **Can activation steering produce a small, coherent drop in performance—and when does that look like sandbagging rather than generic degradation?**
 
-Following OpenAI's Astra model sandbagging on safety tasks without detection by external methods, *and* with only rare exposure in CoT, it looks to be the case that frontier models are capable of degrading their performance on tasks, and our methods are not sufficent to spot it.
+Following [OpenAI's Astra model sandbagging on safety tasks without detection by external methods](https://alignment.openai.com/misalignment-reports/covert-underperformance-on-safety-research-tasks/), *and* with only rare exposure in CoT, it looks to be the case that frontier models are capable of degrading their performance on tasks, and our methods are not sufficent to spot it.
 
 This project studies two related but different things. **Underperformance** is an observable score reduction. **Sandbagging** is deliberate strategic underperformance. We look to use instructed underperformance with 'covert sandbagging' vs 'simple underperformance' framing to find and elicit both by activation steering. We will explore the difference in distrbution of answers, whether errors stay valid and coherent, performance changes across task categories, etc. We will also look to 'steer against' a sandbagging and underperformance direction, to see whether this could produce better performance and in what way.
 
