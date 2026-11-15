@@ -1,0 +1,17 @@
+.venv/
+.DS_Store
+__pycache__/
+.ipynb_checkpoints/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.env
+.env.*
+!.env.example
+results/*
+!results/.gitkeep
+logs/
+data/raw/*
+!data/raw/.gitkeep
+models/
+hf_data/
