@@ -1,0 +1,14 @@
+{
+  "id": "general-qa-calibration-v1",
+  "source": "Previously used eight-question prompt replication; calibration only, not held-out evaluation.",
+  "items": [
+    {"id": "gen_01", "question": "In what year did humans first land on the Moon?", "choices": {"A": "1890", "B": "1969", "C": "1985", "D": "1952"}, "answer": "B"},
+    {"id": "gen_02", "question": "What is the chemical formula for water?", "choices": {"A": "Au", "B": "Ag", "C": "H2O", "D": "CO2"}, "answer": "C"},
+    {"id": "gen_03", "question": "What is 7 + 8?", "choices": {"A": "12", "B": "15", "C": "18", "D": "21"}, "answer": "B"},
+    {"id": "gen_04", "question": "What is the capital of France?", "choices": {"A": "Paris", "B": "Berlin", "C": "Madrid", "D": "Rome"}, "answer": "A"},
+    {"id": "gen_05", "question": "Which planet is the largest in our solar system?", "choices": {"A": "Venus", "B": "Mars", "C": "Mercury", "D": "Jupiter"}, "answer": "D"},
+    {"id": "gen_06", "question": "In what year was the United States Declaration of Independence signed?", "choices": {"A": "1775", "B": "1789", "C": "1776", "D": "1800"}, "answer": "C"},
+    {"id": "gen_07", "question": "What is 8 × 8?", "choices": {"A": "64", "B": "56", "C": "72", "D": "48"}, "answer": "A"},
+    {"id": "gen_09", "question": "What state of matter is oxygen at room temperature?", "choices": {"A": "Solid", "B": "Liquid", "C": "Plasma", "D": "Gas"}, "answer": "D"}
+  ]
+}

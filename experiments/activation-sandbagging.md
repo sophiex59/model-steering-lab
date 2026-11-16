@@ -1,6 +1,6 @@
 # Activation steering toward slight underperformance
 
-**Status:** Proposed protocol. Calibration examples and steering implementation are not yet present.
+**Status:** Proposed steering protocol. A prompt-calibration runner and eight-item pilot now exist; no activation pairs or steering vector have been created. The first corrected pilot did not elicit underperformance, so its responses must not be used to construct a vector.
 
 ## Toy task
 

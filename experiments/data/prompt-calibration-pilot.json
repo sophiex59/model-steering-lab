@@ -14,7 +14,7 @@
     {"id": "cal-01", "entity": "Pell", "choices": {"A": "amber", "B": "cyan", "C": "coral", "D": "gold"}, "answer": "A"},
     {"id": "cal-02", "entity": "Varn", "choices": {"A": "amber", "B": "cyan", "C": "maroon", "D": "silver"}, "answer": "B"},
     {"id": "cal-03", "entity": "Orla", "choices": {"A": "silver", "B": "amber", "C": "violet", "D": "gold"}, "answer": "C"},
-    {"id": "cal-04", "entity": "Kett", "choices": {"A": "coral", "B": "amber", "C": "silver", "D": "teal"}, "answer": "D"},
+    {"id": "cal-04", "entity": "Kett", "choices": {"A": "teal", "B": "amber", "C": "silver", "D": "coral"}, "answer": "D"},
     {"id": "cal-05", "entity": "Miri", "choices": {"A": "silver", "B": "gold", "C": "amber", "D": "violet"}, "answer": "A"},
     {"id": "cal-06", "entity": "Tavon", "choices": {"A": "gold", "B": "teal", "C": "maroon", "D": "coral"}, "answer": "B"},
     {"id": "cal-07", "entity": "Brix", "choices": {"A": "amber", "B": "coral", "C": "maroon", "D": "cyan"}, "answer": "C"},
