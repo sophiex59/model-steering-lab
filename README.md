@@ -30,27 +30,25 @@ We want to find a direction for each by activation steering, and look at:
 
 ## Current status
 
-We are at the prompt stage (**Stage 1 below**). No activation pairs have been collected, no direction has been calculated, and no steering has been tested.
+We are still at the prompt stage (**Stage 1 below**). No activation pairs have been collected, no direction has been calculated, and no steering has been tested. All results so far are Qwen3-4B on a custom 50-item set of arithmetic and fact questions, answering with option text plus a short reason.
 
+- **Instructed underperformance works when the prompt asks for a plausible wrong answer.** "On some of the questions…" gives about 35% wrong answers; "for every question…" gives about 75-80%. The same wording with a different opener (research, evaluation, sanctioned) shifts the size of the effect a lot. Persona prompts ("answer like a weaker model"), difficulty rules, numeric targets and arithmetic-only or facts-only prompts were ignored.
+- **Concealment is not the obstacle.** With the wording held fixed, adding "do not reveal this" still gets the model to underperform (30-33/50 against 50/50 normal). But the reasons only look slightly more honest (about 35% to 45% of wrong answers have no giveaway), so the concealed condition is not yet clearly different from the open one.
+- **The errors are crude.** Instructed errors pick the first wrong option 54-96% of the time. The model's own natural errors on hard multi-step arithmetic do not (2 of 11), and may be a better "weaker model" reference.
+- **Answer format matters.** Asking for option text instead of a letter raised normal accuracy from 44/50 to 50/50.
+- **Chosen conditions:** normal, `core-underperform` and `core-sandbag` (identical wording except the hiding sentence), in [experiments/prompts/chosen-prompts.md](experiments/prompts/chosen-prompts.md).
 
-- Qwen3-0.6B and Qwen3-4B have been run locally on a custom 50-item set of arithmetic and stable-fact questions, controlling for prompt length and format.
-- **Instructed underperformance works, crudely.** On Qwen3-4B, normal prompts scored 43–44/50 and the underperformance prompts scored 1–4/50. But the model picked answer A about 30 times out of 50 even though correct answers were balanced across positions, and many reasons contradicted the chosen answer.
-- **Milder prompts didn't work.** Prompts asking for about 80–90% correct scored 43–44/50 like normal, with nearly identical answers, so the model effectively ignored the instruction.
-- **Answer format matters a lot.** Asking for the option text instead of a letter raised normal 4B performance from 44/50 to 50/50 (the letter errors were mostly arithmetic where the reason was right but the letter was wrong). Under underperformance prompts, text answers scored 16/50 (direct) and 9/50 (concealed), compared with 4/50 and 1/50 with letters. It is still crude: most wrong answers are simply the first wrong option listed.
-- **Direct and concealed behave almost identically** on the 4B so far, so they don't produce distinct behaviours.
-
-
-See [the experiment results so far](experiments/results.md) and [the protocol](docs/protocol.md) for details.
+See [the experiment results](experiments/results.md) and [the protocol](docs/protocol.md) for details.
 
 ## Experiment Set-Up
 
-**Stage 1: elicit the three conditions with prompts.** Using Qwen3-4B (and 0.6B for comparison), write length-matched prompts for normal, direct underperformance, and concealed underperformance. The two underperformance prompts should request the same target and differ only in concealment. We take inspiration from the prompting in [this replication](https://github.com/Divya-Srivastava18521/Frontier-AI-Model-Evaluation-Replication) and from [van der Weij et al.](https://arxiv.org/abs/2406.07358), and check that each prompt really produces its behaviour before using it. Answers are option text plus a short reason.
+**Stage 1: elicit the three conditions with prompts.** Using Qwen3-4B (and 0.6B for comparison), find prompts for normal, open underperformance and concealed underperformance that differ only in the instruction. We draw on [this replication](https://github.com/Divya-Srivastava18521/Frontier-AI-Model-Evaluation-Replication) and [van der Weij et al.](https://arxiv.org/abs/2406.07358). Done for now: see the chosen prompts above. Answers are option text plus a short reason.
 
 **Stage 2: collect matched pairs.** Run the same questions under each condition and keep pairs where the prompt actually changed the answer.
 normal : underperformance : sandbagging
 where normal is correct and the others are incorrect
 
-**Stage 3: extract candidate directions.** Take activations at the same layer and token positions, run under a *neutral* prompt so the direction doesn't just encode the system prompt text, and average the paired differences. Compare directions with cosine similarity (normal to underperformance, normal to sandbagging, underperformance to sandbagging).
+**Stage 3: extract candidate directions.** Read the residual stream at the last prompt token, just before the model replies, at a middle layer chosen by a sweep (roughly layers 12-24 of 36), and take the mean difference between conditions on the same questions. Because no answer has been written at that point, the direction should not simply encode "this answer was wrong". Compare directions with cosine similarity (normal to underperformance, normal to sandbagging, underperformance to sandbagging).
 
 **Stage 4: steer on held-out items** with no instruction: no steering (`α = 0`), positive coefficients, and negative coefficients. Choose settings on a validation split.
 

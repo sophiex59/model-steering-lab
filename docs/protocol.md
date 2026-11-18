@@ -27,14 +27,15 @@ Start with general-knowledge and arithmetic multiple choice, with a deterministi
 
 ## Candidate directions
 
-1. Run the full prompt and response through the model with teacher forcing.
-2. Capture residual-stream activations at one layer, over assistant-response tokens and at the last prompt token.
-3. Run the honest and underperforming responses under the *same neutral prompt* as well as their own, so the direction is not just the system-prompt text.
-4. Keep only pairs where the prompt actually changed the answer.
-5. For each matched item compute `underperforming - normal`, then average: `v = mean(underperforming_activation - normal_activation)`. Do the same for sandbagging, and for sandbagging minus underperformance (the "concealment" component).
-6. Record layer, hook site, token span, dtype, normalization and model revision. Compare directions by cosine similarity and norm; this is diagnostic only.
+Standard recipe from the literature (CAA, ActAdd, Arditi et al., Hua et al.; Im and Li find mean difference beats PCA and classifiers on multiple-choice behaviours), adapted:
 
-A positive coefficient points toward the underperforming examples by construction. A negative coefficient need not undo it.
+1. **Conditions:** normal, `core-underperform` and `core-sandbag` from [chosen-prompts.md](../experiments/prompts/chosen-prompts.md), plus `core-underperform-strong` as a cleaner-contrast reference.
+2. **Read position:** the residual stream at the **last prompt token**, just before the model replies. No answer exists yet, so the vector should not encode "this answer was wrong", and only one forward pass per question per condition is needed. Qwen3 with thinking off appends empty think tags after the assistant marker, so print the final tokens and confirm which token this is. Secondary option: the mean over response tokens (Persona Vectors).
+3. **Layer:** sweep a handful of middle layers (for example 12, 16, 20, 24 of 36) on validation questions. Published choices sit around 40 to 55% depth; the sweep decides.
+4. **Pairs:** the same question under each pair of conditions. Compare three versions: all questions; only questions where the model actually erred; and the strong prompt in place of the "some" prompt. Concealment is isolated by pairing `core-underperform` with `core-sandbag` on questions both erred on (17 of 50 so far).
+5. **Vector:** `v = mean(condition_activation - normal_activation)`. Record layer, position, dtype, normalisation and model revision. Compare vectors by cosine similarity, and check a length-only control (`normal` against `normal` padded to the same token count) to see how much is prompt length.
+
+A positive coefficient points toward the underperforming condition by construction. The strength of underperformance is set by the coefficient, so the extraction prompt does not have to be mild.
 
 ## Steering and controls
 
@@ -44,9 +45,9 @@ A positive coefficient points toward the underperforming examples by constructio
 | Prompted | explicit instruction | none |
 | Toward | neutral | positive α |
 | Away | neutral, or the sandbagging prompt | negative α |
-| Random control | neutral | norm-matched random or shuffled vector |
+| Random control | neutral | norm-matched random vector (Hua et al. used 24) |
 
-Choose layer and coefficient range on validation items, freeze them, then run held-out items with fixed decoding. First check that `α = 0` reproduces the unsteered output. Steering *against* the direction is best tested under the sandbagging prompt, since normal is already near ceiling (the 4B scores 50/50 with option text).
+Add the vector at one layer at every token after the prompt (as CAA and Arditi et al. do). Choose layer and coefficient range on validation items, using a validity or coherence cap on the coefficient (Persona Vectors), freeze them, then run held-out items with fixed decoding. First check that `α = 0` reproduces the unsteered output. Steering *against* the direction is best tested under the sandbagging prompt, since normal is already near ceiling (the 4B scores 50/50 with option text).
 
 ## Outcomes
 
@@ -86,3 +87,4 @@ Developed on an M5 MacBook Pro with 24 GB unified memory using Transformers on M
 
 - **2026-11-13:** target behaviour changed to sandbagging: a contrastive direction that causes slight, coherent underperformance on harmless tasks, compared with an instructed condition.
 - **2026-11-18:** answer format changed from letters to option text; numeric accuracy targets dropped in favour of an intensity ladder; the three-way comparison (normal, underperformance, sandbagging) adopted.
+- **2026-11-18 (later):** concealment shown not to suppress underperformance when wording is held fixed; conditions fixed as `core-normal`, `core-underperform`, `core-sandbag` (plus the strong reference). Direction extraction moved to the last prompt token with a layer sweep, following the literature recipe. Sampling, length matching and block mode dropped as low value.

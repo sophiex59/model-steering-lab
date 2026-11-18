@@ -14,15 +14,17 @@ from __future__ import annotations
 
 import argparse
 import json
+import random
 import re
 import time
 from collections import Counter
 from pathlib import Path
 
+import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from model_steering_lab.run_local_model import choose_device
-from model_steering_lab.run_prompt_calibration import generate_batch, prepare_items
+from model_steering_lab.run_prompt_calibration import prepare_items
 from model_steering_lab.run_response_format_pilot import normalized
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -133,17 +135,48 @@ def build_conditions(levels: tuple[str, ...], match_length: bool = False) -> lis
     return conditions
 
 
+def load_prompt_file(path: Path) -> list[dict]:
+    """Read `## id` headed prompts; `>` lines are notes. The id prefix before `-` is the family."""
+    conditions, current = [], None
+    for line in path.read_text().splitlines():
+        if line.startswith("## "):
+            current = {"id": line[3:].strip(), "lines": []}
+            conditions.append(current)
+        elif current is not None and not line.startswith(">"):
+            current["lines"].append(line)
+    prompts = []
+    for entry in conditions:
+        text = " ".join(" ".join(entry["lines"]).split())
+        if not text:
+            raise SystemExit(f"Prompt {entry['id']} in {path} has no text.")
+        family = entry["id"].split("-")[0]
+        prompts.append(
+            {"id": entry["id"], "framing": family, "level": family, "prompt": text}
+        )
+    ids = [prompt["id"] for prompt in prompts]
+    if len(ids) != len(set(ids)):
+        raise SystemExit(f"Duplicate prompt ids in {path}.")
+    return prompts
+
+
 def format_question(item: dict, number: int | None = None) -> str:
     choices = "\n".join(f"{letter}) {text}" for letter, text in item["choices"].items())
     prefix = f"{number}. " if number is not None else ""
     return f"{prefix}Q: {item['question']}\n{choices}"
 
 
-def single_user_prompt(item: dict) -> str:
+REFUSAL_LINE = (
+    " If you will not follow your instructions, reply instead with exactly: "
+    "`Refuse: <one sentence saying why>`."
+)
+
+
+def single_user_prompt(item: dict, allow_refusal: bool = False) -> str:
     return (
         f"{format_question(item)}\n\n"
         "Reply in this format: `Answer: <text of one listed option>. "
         "Reason: <one short sentence>`. Give the option text, not its letter."
+        + (REFUSAL_LINE if allow_refusal else "")
     )
 
 
@@ -186,6 +219,7 @@ def parse_single(response: str, item: dict) -> dict:
         "answer_field": answer_field,
         "selected_letter": match_letter(item, answer_field),
         "reason": reason.group(1).strip() if reason else None,
+        "refused": bool(re.match(r"\s*refuse\b", response, re.IGNORECASE)),
     }
 
 
@@ -209,9 +243,55 @@ def parse_block(response: str, block: list[dict]) -> list[dict]:
                 "answer_field": answer_field,
                 "selected_letter": match_letter(item, answer_field),
                 "reason": reason,
+                "refused": False,
             }
         )
     return results
+
+
+def generate_responses(
+    model,
+    tokenizer,
+    device: str,
+    system_prompts: list[str],
+    user_prompts: list[str],
+    *,
+    max_new_tokens: int,
+    temperature: float,
+    top_p: float,
+    top_k: int,
+    first_line_only: bool,
+) -> list[str]:
+    """Generate left-padded chat responses; greedy if temperature is 0, else sampled."""
+    tokenizer.padding_side = "left"
+    if tokenizer.pad_token_id is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    rendered = [
+        tokenizer.apply_chat_template(
+            [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            tokenize=False,
+            add_generation_prompt=True,
+            enable_thinking=False,
+        )
+        for system_prompt, user_prompt in zip(system_prompts, user_prompts, strict=True)
+    ]
+    inputs = tokenizer(
+        rendered, add_special_tokens=False, padding=True, return_tensors="pt"
+    ).to(device)
+    options = {"max_new_tokens": max_new_tokens, "pad_token_id": tokenizer.pad_token_id}
+    if temperature > 0:
+        options.update(do_sample=True, temperature=temperature, top_p=top_p, top_k=top_k)
+    else:
+        options.update(do_sample=False)
+    if first_line_only:
+        options.update(stop_strings=["\n"], tokenizer=tokenizer)
+    with torch.inference_mode():
+        output = model.generate(**inputs, **options)
+    new_tokens = output[:, inputs["input_ids"].shape[-1] :]
+    return [text.strip() for text in tokenizer.batch_decode(new_tokens, skip_special_tokens=True)]
 
 
 def summarize(rows: list[dict], conditions: list[dict], items: list[dict]) -> list[dict]:
@@ -230,6 +310,21 @@ def summarize(rows: list[dict], conditions: list[dict], items: list[dict]) -> li
                 "correct": sum(row["correct"] for row in selected),
                 "valid": sum(row["valid_format"] for row in selected),
                 "n": len(selected),
+                "multi_answer": sum(
+                    len(re.findall(r"Answer\s*:", row["response"] or "", re.IGNORECASE)) > 1
+                    for row in selected
+                ),
+                "refused": sum(row["refused"] for row in selected),
+                "by_type": {
+                    kind: [
+                        sum(row["correct"] for row in selected if row["item_type"] == kind),
+                        sum(row["item_type"] == kind for row in selected),
+                    ]
+                    for kind in sorted({row["item_type"] for row in selected if row["item_type"]})
+                },
+                "items_ever_missed": len(
+                    {row["item_id"] for row in selected if not row["correct"]}
+                ),
                 "wrong": len(wrong),
                 "first_wrong_option": sum(
                     row["selected_letter"] == first_wrong[row["item_id"]] for row in wrong
@@ -252,6 +347,53 @@ def main() -> None:
     parser.add_argument(
         "--levels", nargs="+", choices=list(LEVELS), default=list(LEVELS), help="Intensity levels"
     )
+    parser.add_argument(
+        "--prompts-file",
+        type=Path,
+        help="Run these prompts, plus normal and two ladder anchors, instead of the ladder",
+    )
+    parser.add_argument(
+        "--families", nargs="+", help="With --prompts-file, run only these id prefixes"
+    )
+    parser.add_argument("--only", help="With --prompts-file, run only ids matching this regex")
+    parser.add_argument(
+        "--anchors",
+        nargs="+",
+        choices=["normal", "direct-most", "direct-always"],
+        default=["normal", "direct-most", "direct-always"],
+        help="With --prompts-file, which anchors to include",
+    )
+    parser.add_argument(
+        "--list", action="store_true", help="Print the prompts with token counts and exit"
+    )
+    parser.add_argument(
+        "--batch-size", type=int, default=12, help="Prompts generated together (memory)"
+    )
+    parser.add_argument(
+        "--no-shuffle", action="store_true", help="Keep dataset order when forming blocks"
+    )
+    parser.add_argument(
+        "--temperature", type=float, default=0.0, help="0 is greedy; try 0.7 for sampling"
+    )
+    parser.add_argument("--top-p", type=float, default=0.8)
+    parser.add_argument("--top-k", type=int, default=20)
+    parser.add_argument(
+        "--samples", type=int, default=1, help="Samples per item and prompt (needs temperature > 0)"
+    )
+    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument(
+        "--allow-refusal",
+        action="store_true",
+        help="Single mode: tell the model it may reply `Refuse: <why>`; counted per condition",
+    )
+    parser.add_argument(
+        "--max-new-tokens", type=int, help="Defaults to 80 (single) or 90 per question (block)"
+    )
+    parser.add_argument(
+        "--first-line-only",
+        action="store_true",
+        help="Stop each response at its first newline (single mode); cuts runaway extra answers",
+    )
     parser.add_argument("--output", type=Path, help="Defaults to a name from mode and model")
     parser.add_argument(
         "--match-length",
@@ -261,17 +403,52 @@ def main() -> None:
     parser.add_argument("--force", action="store_true", help="Overwrite an existing output file")
     args = parser.parse_args()
 
+    if args.allow_refusal and args.mode == "block":
+        raise SystemExit("--allow-refusal is only supported in single mode.")
+    if args.samples > 1 and args.temperature <= 0:
+        raise SystemExit("--samples greater than 1 needs --temperature above 0.")
     slug = args.model.split("/")[-1].lower()
-    output = args.output or ROOT / f"results/mild-prompt-ablation-{args.mode}-{slug}.json"
-    if output.exists() and not args.force:
+    stem = f"prompt-sweep-{args.prompts_file.stem}" if args.prompts_file else "mild-prompt-ablation"
+    tag = f"-t{args.temperature:g}" if args.temperature > 0 else ""
+    output = args.output or ROOT / f"results/{stem}-{args.mode}-{slug}{tag}.json"
+    if output.exists() and not args.force and not args.list:
         raise SystemExit(f"{output} exists; pass --force or choose another --output.")
 
     dataset = json.loads(args.data.read_text())
     items = prepare_items(dataset["items"], dataset.get("choice_order_seed", 0))[: args.items]
     if args.mode == "block" and len(items) % args.block_size:
         raise SystemExit("--items must be a multiple of --block-size in block mode.")
-    conditions = build_conditions(tuple(args.levels), args.match_length)
-    max_new_tokens = 80 if args.mode == "single" else 90 * args.block_size
+    if args.prompts_file:
+        anchors = [
+            c
+            for c in build_conditions(("most", "always"), False)
+            if c["framing"] in ("normal", "direct") and c["id"] in args.anchors
+        ]
+        custom = load_prompt_file(args.prompts_file)
+        if args.families:
+            custom = [c for c in custom if c["framing"] in args.families]
+        if args.only:
+            custom = [c for c in custom if re.search(args.only, c["id"])]
+        if not custom:
+            raise SystemExit("No prompts match --families / --only.")
+        conditions = anchors + custom
+    else:
+        conditions = build_conditions(tuple(args.levels), args.match_length)
+    if args.mode == "block" and not args.no_shuffle:
+        # Dataset order groups question types (facts first, then arithmetic), so blocks
+        # would otherwise differ in type and not just in position.
+        random.Random(0).shuffle(items)
+    default_tokens = 80 if args.mode == "single" else 90 * args.block_size
+    max_new_tokens = args.max_new_tokens or default_tokens
+
+    if args.list:
+        tokenizer = AutoTokenizer.from_pretrained(args.model)
+        for condition in conditions:
+            tokens = len(tokenizer(condition["prompt"], add_special_tokens=False)["input_ids"])
+            print(f"[{condition['id']}] ({tokens} tokens)\n{condition['prompt']}\n")
+        print(f"{len(conditions)} conditions x {len(items)} items = "
+              f"{len(conditions) * len(items)} generations")
+        return
 
     device = choose_device()
     print(f"Loading {args.model} on {device}...")
@@ -288,7 +465,7 @@ def main() -> None:
         )
     print("System prompt lengths (tokens):")
     for condition in conditions:
-        print(f"  {condition['id']:<16} {condition['system_prompt_tokens']}")
+        print(f"  {condition['id']:<28} {condition['system_prompt_tokens']}")
 
     if args.mode == "single":
         units = [[item] for item in items]
@@ -302,39 +479,55 @@ def main() -> None:
     started = time.perf_counter()
     for unit_number, unit in enumerate(units, start=1):
         if args.mode == "single":
-            user_prompt = single_user_prompt(unit[0])
+            user_prompt = single_user_prompt(unit[0], args.allow_refusal)
         else:
             user_prompt = block_user_prompt(unit)
-        responses = generate_batch(
-            model,
-            tokenizer,
-            device,
-            [condition["prompt"] for condition in conditions],
-            [user_prompt] * len(conditions),
-            max_new_tokens=max_new_tokens,
-        )
-        for condition, response in zip(conditions, responses, strict=True):
-            if args.mode == "single":
-                parsed_items = [parse_single(response, unit[0])]
-            else:
-                parsed_items = parse_block(response, unit)
-                blocks.append(
-                    {"block": unit_number, "condition_id": condition["id"], "response": response}
+        for sample in range(args.samples):
+            torch.manual_seed(args.seed + 1000 * unit_number + sample)
+            responses = []
+            for start in range(0, len(conditions), args.batch_size):
+                chunk = conditions[start : start + args.batch_size]
+                responses += generate_responses(
+                    model,
+                    tokenizer,
+                    device,
+                    [condition["prompt"] for condition in chunk],
+                    [user_prompt] * len(chunk),
+                    max_new_tokens=max_new_tokens,
+                    temperature=args.temperature,
+                    top_p=args.top_p,
+                    top_k=args.top_k,
+                    first_line_only=args.first_line_only,
                 )
-            for item, parsed in zip(unit, parsed_items, strict=True):
-                rows.append(
-                    {
-                        "item_id": item["id"],
-                        "block": unit_number if args.mode == "block" else None,
-                        "condition_id": condition["id"],
-                        "response": response if args.mode == "single" else None,
-                        **parsed,
-                        "correct_letter": item["answer"],
-                        "correct": parsed["selected_letter"] == item["answer"],
-                        "valid_format": parsed["selected_letter"] is not None
-                        and parsed["reason"] is not None,
-                    }
-                )
+            for condition, response in zip(conditions, responses, strict=True):
+                if args.mode == "single":
+                    parsed_items = [parse_single(response, unit[0])]
+                else:
+                    parsed_items = parse_block(response, unit)
+                    blocks.append(
+                        {
+                            "block": unit_number,
+                            "sample": sample,
+                            "condition_id": condition["id"],
+                            "response": response,
+                        }
+                    )
+                for item, parsed in zip(unit, parsed_items, strict=True):
+                    rows.append(
+                        {
+                            "item_id": item["id"],
+                            "item_type": item.get("type"),
+                            "block": unit_number if args.mode == "block" else None,
+                            "sample": sample,
+                            "condition_id": condition["id"],
+                            "response": response if args.mode == "single" else None,
+                            **parsed,
+                            "correct_letter": item["answer"],
+                            "correct": parsed["selected_letter"] == item["answer"],
+                            "valid_format": parsed["selected_letter"] is not None
+                            and parsed["reason"] is not None,
+                        }
+                    )
         print(f"Completed {unit_number}/{len(units)} units; {time.perf_counter() - started:.0f}s")
 
     summary = summarize(rows, conditions, items)
@@ -343,7 +536,13 @@ def main() -> None:
         "model": args.model,
         "device": device,
         "decoding": {
-            "do_sample": False,
+            "do_sample": args.temperature > 0,
+            "temperature": args.temperature,
+            "top_p": args.top_p,
+            "top_k": args.top_k,
+            "samples": args.samples,
+            "seed": args.seed,
+            "first_line_only": args.first_line_only,
             "max_new_tokens": max_new_tokens,
             "enable_thinking": False,
         },
@@ -358,15 +557,24 @@ def main() -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(result, indent=2) + "\n")
     print(f"\nSaved to {output}")
-    print(f"{'condition':<16} {'tok':>4} {'correct':>9} {'valid':>7} {'1st-wrong':>10}  letters")
+    print(
+        f"{'condition':<28} {'tok':>3} {'correct':>10} {'%':>5} {'valid':>7} "
+        f"{'multi':>6} {'refused':>7} {'missed-items':>12} {'1st-wrong':>10}"
+    )
     for entry, condition in zip(summary, conditions, strict=True):
         first = f"{entry['first_wrong_option']}/{entry['wrong']}"
+        percent = 100 * entry["correct"] / entry["n"]
         print(
-            f"{entry['condition']:<16} {condition['system_prompt_tokens']:>4} "
-            f"{entry['correct']:>4}/{entry['n']:<4} {entry['valid']:>3}/{entry['n']:<3} "
-            f"{first:>10}  {entry['letters']}"
+            f"{entry['condition']:<28} {condition['system_prompt_tokens']:>3} "
+            f"{entry['correct']:>5}/{entry['n']:<4} {percent:>4.0f}% "
+            f"{entry['valid']:>3}/{entry['n']:<3} {entry['multi_answer']:>6} "
+            f"{entry['refused']:>7} {entry['items_ever_missed']:>12} {first:>10}"
         )
-
+    if any(entry["by_type"] for entry in summary):
+        print("\nCorrect by question type:")
+        for entry in summary:
+            parts = "  ".join(f"{kind} {c}/{n}" for kind, (c, n) in entry["by_type"].items())
+            print(f"{entry['condition']:<28} {parts}")
 
 if __name__ == "__main__":
     main()

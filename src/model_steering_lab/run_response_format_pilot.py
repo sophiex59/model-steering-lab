@@ -7,7 +7,6 @@ import json
 import re
 from pathlib import Path
 
-import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from model_steering_lab.run_local_model import choose_device

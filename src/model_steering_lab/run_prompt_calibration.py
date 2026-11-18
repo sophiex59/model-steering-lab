@@ -7,7 +7,7 @@ import json
 import random
 import re
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import torch
@@ -186,7 +186,7 @@ def main() -> None:
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     args = parser.parse_args()
 
-    run_started_at = datetime.now(timezone.utc)
+    run_started_at = datetime.now(UTC)
     run_started = time.perf_counter()
     dataset = json.loads(args.data.read_text())
     device = choose_device()
