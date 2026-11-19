@@ -8,7 +8,6 @@
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-
 from model_steering_lab.run_local_model import DEFAULT_MODEL, DEFAULT_PROMPT, choose_device
 
 # %% Settings

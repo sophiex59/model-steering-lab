@@ -24,6 +24,14 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
 
+[tool.ruff.lint.per-file-ignores]
+# Long lines here are prompt text and notes that should stay on one line.
+"src/model_steering_lab/inspect_activations.py" = ["E501"]
+"src/model_steering_lab/run_local_model.py" = ["E501"]
+"src/model_steering_lab/run_normal_prompt_variants.py" = ["E501"]
+"src/model_steering_lab/run_prompt_calibration.py" = ["E501"]
+"src/model_steering_lab/run_response_format_pilot.py" = ["E501"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
